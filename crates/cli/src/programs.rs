@@ -4,40 +4,13 @@ use crate::table::{Table, kv};
 use crate::{BandArg, ChannelFilter, EpgCmd, Out, ResvOpts, bands, when};
 use nasne_core::epg::{self, Channel};
 use nasne_core::model::{self, ReserveReq};
-use nasne_core::{Band, Epg, Event, Nasne, Res, jst};
+use nasne_core::program::{self, Query, channel_matches, load};
+use nasne_core::{Band, Event, Nasne, Res, jst};
 use serde::Serialize;
-use unicode_normalization::UnicodeNormalization as _;
 
 // ---------------------------------------------------------------- 番組 ID
-/// 番組 ID（"gr:30720:1234" = 放送波:サービス ID:イベント ID）
-pub fn program_id(band: Band, e: &Event) -> String {
-    format!("{}:{}:{}", band.key(), e.sid, e.eid)
-}
-
 fn parse_program_id(s: &str) -> Res<(Band, u16, u16)> {
-    let bad = || format!("番組 ID が読めません: {s}（gr:30720:1234 の形。nasne epg の一覧の左端の列）");
-    let p: Vec<&str> = s.trim().split(':').collect();
-    let [b, sid, eid] = p.as_slice() else { return Err(bad()) };
-    let band = Band::from_key(b).ok_or_else(bad)?;
-    Ok((band, sid.parse().map_err(|_| bad())?, eid.parse().map_err(|_| bad())?))
-}
-
-// ---------------------------------------------------------------- 読み込み
-/// 番組表を放送波ごとに並列で読む（キャッシュが最新ならそれを使う）
-fn load(n: &Nasne, bands: &[Band]) -> Res<Vec<(Band, Epg)>> {
-    std::thread::scope(|s| {
-        let hs: Vec<_> = bands.iter().map(|&b| (b, s.spawn(move || epg::load(n, b)))).collect();
-        hs.into_iter()
-            .map(|(b, h)| {
-                let e = h.join().unwrap_or_else(|_| Err("番組表の読み込みに失敗しました".into()))?;
-                Ok((b, e))
-            })
-            .collect()
-    })
-}
-
-fn normalize(s: &str) -> String {
-    s.nfkc().collect::<String>().to_lowercase()
+    program::parse_id(s).ok_or_else(|| format!("番組 ID が読めません: {s}（gr:30720:1234 の形。nasne epg の一覧の左端の列）"))
 }
 
 impl ChannelFilter {
@@ -47,11 +20,7 @@ impl ChannelFilter {
 
     /// 名前の一部・チャンネル番号・サービス ID
     fn matches(&self, c: &Channel) -> bool {
-        let Some(q) = self.channel.as_deref().map(str::trim).filter(|q| !q.is_empty()) else { return true };
-        if let Ok(x) = q.parse::<i64>() {
-            return c.number == x || c.sid as i64 == x;
-        }
-        normalize(&c.name).contains(&normalize(q))
+        channel_matches(c, self.channel.as_deref().unwrap_or(""))
     }
 }
 
@@ -67,7 +36,7 @@ struct Program<'a> {
 
 impl<'a> Program<'a> {
     fn new(band: Band, ch: &'a Channel, e: &'a Event) -> Self {
-        Program { id: program_id(band, e), band, channel: &ch.name, event: e }
+        Program { id: program::id(band, e), band, channel: &ch.name, event: e }
     }
 }
 
@@ -157,28 +126,9 @@ pub fn run(n: &Nasne, out: &Out, cmd: EpgCmd) -> Res<()> {
             print_programs(out, &list, true);
         }
         EpgCmd::Search { words, filter, genre } => {
-            let words: Vec<String> = words.iter().map(|w| normalize(w)).collect();
-            let genre = genre.as_deref().map(normalize);
+            let q = Query::new(&words, genre.as_deref());
             let epgs = load(n, &filter.bands())?;
-            let hit = |e: &Event| {
-                if e.end() <= now {
-                    return false;
-                }
-                if let Some(g) = &genre
-                    && (e.genre_name().is_empty() || !normalize(e.genre_name()).contains(g))
-                {
-                    return false;
-                }
-                let mut hay = format!("{} {}", e.title, e.desc);
-                for (k, v) in &e.ext {
-                    hay.push(' ');
-                    hay.push_str(k);
-                    hay.push(' ');
-                    hay.push_str(v);
-                }
-                let hay = normalize(&hay);
-                words.iter().all(|w| hay.contains(w))
-            };
+            let hit = |e: &Event| e.end() > now && q.matches(e);
             let mut list = Vec::new();
             for (b, d) in &epgs {
                 for c in d.channels.iter().filter(|c| filter.matches(c)) {
@@ -198,8 +148,7 @@ fn find(n: &Nasne, id: &str) -> Res<(Band, Channel, Event)> {
     let (band, sid, eid) = parse_program_id(id)?;
     let d = epg::load(n, band)?;
     let e = d.get(sid, eid).ok_or("番組表にその番組がありません（終わった番組は消えます）")?;
-    let ch = d.channels.iter().find(|c| c.sid == sid).cloned().unwrap_or(Channel { sid, name: format!("サービス {sid}"), number: 0 });
-    Ok((band, ch, e.clone()))
+    Ok((band, program::channel(&d, sid), e.clone()))
 }
 
 fn show(n: &Nasne, out: &Out, id: &str) -> Res<()> {
@@ -221,7 +170,7 @@ fn show(n: &Nasne, out: &Out, id: &str) -> Res<()> {
         ("放送", when::span(e.start, e.end())),
         ("長さ", dur(&e)),
         ("ジャンル", e.genre_name().to_string()),
-        ("番組ID", program_id(band, &e)),
+        ("番組ID", program::id(band, &e)),
     ];
     if let Some(r) = &resv {
         rows.push((

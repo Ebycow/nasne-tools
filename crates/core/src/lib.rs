@@ -10,6 +10,7 @@
 //! | [`model`] | 予約・録画などのデータと、画質・繰り返しの表示名 |
 //! | [`info`] | 本体情報（読み取りのみ） |
 //! | [`epg`] | 番組表の取得・解析・キャッシュ、局ロゴ |
+//! | [`program`] | 番組 ID・番組の検索・局の絞り込み |
 //! | [`store`] | ディスクキャッシュと設定（GUI とコマンドで共有） |
 //! | [`jst`] | 日本時間の日時計算 |
 //! | [`gaiji`] | nasne の外字と [字] などの表示用文字列の変換 |
@@ -26,6 +27,7 @@ pub mod json;
 pub mod jst;
 pub mod model;
 pub mod ops;
+pub mod program;
 pub mod store;
 
 pub use client::{Nasne, Res};

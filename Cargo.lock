@@ -1537,7 +1537,6 @@ dependencies = [
  "nasne-core",
  "serde",
  "serde_json",
- "unicode-normalization",
  "unicode-width",
 ]
 
