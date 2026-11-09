@@ -4,8 +4,9 @@ nasne の **番組表・録画予約・録画一覧・本体情報** をパソ�
 
 - **nasne-gui** … デスクトップアプリ。番組表を見ながら予約や録画の整理ができます。
 - **nasne** … コマンドライン。同じことを端末やスクリプトから行えます（`--json` で機械可読な出力）。
+- **nasne-mcp** … MCP サーバ。Claude などの AI アシスタントから、番組を探したり予約や録画を整理したりできます。
 
-どちらも同じ LAN にある nasne に直接つなぎます。インターネットやクラウドのサービスは使いません。
+どれも同じ LAN にある nasne に直接つなぎます。インターネットやクラウドのサービスは使いません（MCP サーバの結果は、使う AI アシスタントに渡ります）。
 macOS / Windows / Linux で動き、それぞれ単一の実行ファイルです。Rust で書いています（GUI は [egui](https://github.com/emilk/egui)）。
 
 **番組の視聴・ダビング・書き出しはできません。** 映像や音声には一切触れず、番組の情報と録画の管理だけを扱います（[方針](#方針)）。
@@ -49,26 +50,27 @@ cd nasne-tools
 cargo build --release
 ```
 
-`target/release/` に次の 2 つができます（Windows は `.exe` つき）。どちらもほかのファイルを置かなくても動きます。
+`target/release/` に次の 3 つができます（Windows は `.exe` つき）。どれもほかのファイルを置かなくても動きます。
 
 | 実行ファイル | 内容 | 大きさ（目安） |
 |---|---|---|
 | `nasne-gui` | デスクトップアプリ | 約 5.5 MB |
 | `nasne` | コマンドライン | 約 1.5 MB |
+| `nasne-mcp` | MCP サーバ | 約 1.2 MB |
 
-片方だけ作るときは `cargo build --release -p nasne-gui` / `cargo build --release -p nasne-cli` です。
+1 つだけ作るときは `cargo build --release -p nasne-gui` / `-p nasne-cli` / `-p nasne-mcp` です。
 `nasne` をパスの通った場所に置くときは `cargo install --path crates/cli` でも入れられます。
 
 ## はじめて使うとき
 
-起動すると、同じネットワーク（/24）の中から nasne を自動で探して接続し、その接続先を保存します。GUI とコマンドラインで接続先は共通です。
+起動すると、同じネットワーク（/24）の中から nasne を自動で探して接続し、その接続先を保存します。GUI・コマンドライン・MCP サーバで接続先は共通です。
 
 自動で見つからないときや、nasne が複数あるときは、次のどれかで接続先を指定してください。
 
 - GUI の「nasne情報」タブの「接続先」に IP アドレスを入力して「接続」を押す（次回からはその接続先を使います）
 - `nasne host 192.168.1.20` で保存する
 - 環境変数 `NASNE_HOST` に IP アドレスを入れて起動する（保存はしません）
-- コマンドラインでは `--host 192.168.1.20` でも指定できます
+- コマンドラインと MCP サーバでは `--host 192.168.1.20` でも指定できます
 
 ## コマンドラインの使い方
 
@@ -104,6 +106,60 @@ nasne rec protect <録画ID>
 - `-b` は放送波（`gr` = 地デジ / `bs` / `cs`）、`-c` は局（名前の一部・チャンネル番号・サービス ID）です。
 - `-d` の日付は `today` / `tomorrow` / `+2` / `11-12` / `2026-11-12` で、番組表の 1 日は 4:00〜翌 4:00 です。
 
+## MCP サーバ（AI アシスタントから使う）
+
+`nasne-mcp` は [MCP（Model Context Protocol）](https://modelcontextprotocol.io/) のサーバです。Claude などの MCP に対応した AI アシスタントに登録すると、次のように頼めるようになります。
+
+- 「今夜のドラマで面白そうなものを探して、DR で予約して」
+- 「毎週の大河ドラマを予約しておいて。ほかの予約と重なっていたら教えて」
+- 「見終わった録画で、保護していない大きいものを一覧にして」
+
+標準入出力でやり取りする（stdio）サーバで、AI アシスタントのアプリが必要なときに起動します。自分で起動しておく必要はありません。
+
+### 登録のしかた
+
+**Claude Code**
+
+```sh
+claude mcp add nasne -- /path/to/nasne-mcp
+# 接続先を指定するとき
+claude mcp add nasne -- /path/to/nasne-mcp --host 192.168.1.20
+```
+
+**Claude Desktop など、設定ファイルに書くもの**（Claude Desktop は `claude_desktop_config.json`）
+
+```json
+{
+  "mcpServers": {
+    "nasne": {
+      "command": "/path/to/nasne-mcp",
+      "args": ["--host", "192.168.1.20"]
+    }
+  }
+}
+```
+
+接続先を保存済み（GUI か `nasne host` で設定済み）なら `--host` はいりません。
+
+### ツール
+
+| ツール | 内容 | 種類 |
+|---|---|---|
+| `status` / `device_info` | 本体の状態（HDD の残り・録画中か・現在時刻）/ 本体情報 | 読み取り |
+| `list_channels` / `now_on_air` | チャンネル一覧 / 放送中の番組 | 読み取り |
+| `list_programs` / `search_programs` / `get_program` | 番組表 / 番組検索 / 番組の詳細 | 読み取り |
+| `list_reservations` / `list_failed_reservations` | 予約の一覧 / 録画できなかった予約 | 読み取り |
+| `list_recordings` | 録画の一覧（絞り込み・並べ替え・合計サイズ） | 読み取り |
+| `blink` | 本体のランプを点灯させる | 変更 |
+| `reserve_program` / `update_reservation` | 録画予約 / 予約の変更（画質・繰り返し・優先度） | 変更 |
+| `update_recording` | 録画のタイトル・未視聴 / 視聴済み・保護の変更 | 変更 |
+| `cancel_reservation` / `delete_recording` / `clear_failed_reservation` | 予約の取り消し / 録画の削除 / 録画できなかった予約を一覧から消す | 元に戻せない |
+
+- 実行してよいかの確認は、AI アシスタントのアプリの権限の仕組みに任せています。判断できるように、各ツールに MCP の注釈を付けています（読み取りは `readOnlyHint`、元に戻せない操作は `destructiveHint`）。録画の削除などを毎回確認したいときは、アプリの設定で、そのツールを自動で許可しないようにしてください。
+- 録画予約は、ほかの予約と時間が重なるときは予約せずに、重なる予約を返します（`allow_conflict` を付けると、それでも予約します）。
+- ツールの結果（番組表・予約・録画の一覧など）は、AI アシスタントのサービスに送られます。nasne-mcp 自身はインターネットにつなぎません。
+- 番組表は起動中はメモリに持ち、続けて使うときは 60 秒ごとに版数情報を確認します。キャッシュは GUI・コマンドラインと共有します。
+
 ## 方針
 
 このツールは、nasne が LAN 内に公開している HTTP の仕組みのうち、**番組情報と録画・予約の管理に必要な部分だけ** を使います。
@@ -116,7 +172,7 @@ nasne rec protect <録画ID>
 ## 仕組み
 
 - **番組表**: nasne が受信して内部に持っている EPG を取得し、手元で解析します。外部の番組表サービスは使いません。
-- **キャッシュ**: 一度取得した番組表はディスクにキャッシュし、GUI とコマンドラインで共有します。使う前に数 KB の版数情報だけを確認し、番組表が更新されたときだけ取り直します。
+- **キャッシュ**: 一度取得した番組表はディスクにキャッシュし、GUI・コマンドライン・MCP サーバで共有します。使う前に数 KB の版数情報だけを確認し、番組表が更新されたときだけ取り直します。
 - **GUI の軽さ**
   - 2 回目以降の起動では、ウィンドウが開いてから約 0.17 秒で番組表が出ます（Apple Silicon の Mac で計測）。最新かどうかの確認はその裏で行います。
   - 3 つの放送波を並列で取得・解析するので、地デジ / BS / CS の切り替えで待たされません。
@@ -137,13 +193,14 @@ nasne rec protect <録画ID>
 
 ### 構成
 
-Cargo のワークスペースで、nasne を扱う処理はすべて `nasne-core` にまとめ、GUI とコマンドラインは表示と入力だけを受け持ちます。
+Cargo のワークスペースで、nasne を扱う処理はすべて `nasne-core` にまとめ、GUI・コマンドライン・MCP サーバは表示と入力だけを受け持ちます。
 
 ```
 crates/
   core/  nasne-core  … nasne との通信・番組表の解析・操作・キャッシュ（ライブラリ）
   gui/   nasne-gui   … デスクトップアプリ（実行ファイル nasne-gui）
   cli/   nasne-cli   … コマンドライン（実行ファイル nasne）
+  mcp/   nasne-mcp   … MCP サーバ（実行ファイル nasne-mcp）
 tools/
   gen_jis.py         … 文字コード変換表の生成
 ```
@@ -154,6 +211,7 @@ tools/
 | `crates/core/src/ops.rs` | 一覧の取得・予約・録画の変更などの操作（`Nasne` のメソッド） |
 | `crates/core/src/model.rs` | 予約・録画などのデータ、画質・繰り返しの表示名 |
 | `crates/core/src/info.rs` | 本体情報（読み取りのみ） |
+| `crates/core/src/program.rs` | 番組 ID・番組の検索・局の絞り込み（コマンドと MCP サーバで共有） |
 | `crates/core/src/epg.rs` | 番組表と局ロゴの取得・EIT の解析・キャッシュつきの読み込み、放送波（`Band`） |
 | `crates/core/src/arib/` | ARIB STD-B24 の文字列を UTF-8 に変換（追加記号の表、JIS X 0213 の変換表を含む） |
 | `crates/core/src/gaiji.rs` | nasne の外字と `[字]` などの表示用文字列の変換 |
@@ -165,6 +223,8 @@ tools/
 | `crates/cli/src/main.rs` | 引数の定義、接続先の決定 |
 | `crates/cli/src/programs.rs` | 番組表のコマンド（チャンネル・放送中・番組表・検索・詳細・録画予約） |
 | `crates/cli/src/manage.rs` | 本体・予約・録画のコマンド |
+| `crates/mcp/src/main.rs` | MCP のプロトコル（標準入出力の JSON-RPC）と引数 |
+| `crates/mcp/src/tools.rs` | MCP のツールの定義と中身 |
 
 `crates/core/src/arib/jis.bin` と `jis_pairs.rs` は生成済みのものをリポジトリに含めているので、ビルドに Python は要りません。
 作り直すときは `python3 tools/gen_jis.py` を実行します（Python 標準ライブラリの codec から作ります）。
@@ -173,7 +233,7 @@ tools/
 
 | 変数 | 内容 |
 |---|---|
-| `NASNE_HOST` | 接続先の IP アドレス（GUI・コマンドライン共通） |
+| `NASNE_HOST` | 接続先の IP アドレス（GUI・コマンドライン・MCP サーバ共通） |
 | `NASNE_GUI_BENCH=1` | GUI の起動にかかった時間を表示し、番組表が出たら終了する |
 | `NASNE_GUI_VIEW` | GUI の起動時に開くタブ。`reserved`（予約一覧）/ `recorded`（録画一覧）/ `info`（nasne 情報）/ `program`（放送中の番組の詳細） |
 

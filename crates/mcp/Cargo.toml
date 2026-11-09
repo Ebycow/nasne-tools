@@ -1,0 +1,16 @@
+[package]
+name = "nasne-mcp"
+description = "nasne の番組表・録画予約・録画管理を AI アシスタントから扱う MCP サーバ（視聴機能なし）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nasne-mcp"
+path = "src/main.rs"
+
+[dependencies]
+nasne-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
