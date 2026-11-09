@@ -1,0 +1,13 @@
+[package]
+name = "nasne-gui"
+description = "nasne の番組表・録画予約・録画管理のデスクトップアプリ（視聴機能なし）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+nasne-core.workspace = true
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "links", "wayland", "x11"] }
+egui_extras = { version = "0.37", default-features = false }
+memmap2 = "0.9"

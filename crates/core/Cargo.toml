@@ -1,0 +1,17 @@
+[package]
+name = "nasne-core"
+description = "nasne との通信・番組表の解析・録画予約と録画管理（nasne-gui と nasne コマンドの共通部分）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+ureq = { version = "3", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sha1_smol = "1"
+base64 = "0.22"
+png = "0.18"
+unicode-normalization = "0.1"
